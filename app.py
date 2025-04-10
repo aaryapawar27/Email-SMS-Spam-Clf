@@ -4,69 +4,82 @@ import string
 import nltk
 import os
 
-# ===== NLTK SETUP - PROPER CONFIGURATION =====
-# Set up NLTK data directory
-nltk_data_dir = os.path.join(os.getcwd(), "nltk_data")
-os.makedirs(nltk_data_dir, exist_ok=True)
-nltk.data.path.append(nltk_data_dir)
+# ===== 1. NLTK SETUP - THIS WILL FIX THE ERROR =====
+# Create and configure NLTK data directory
+nltk_data_path = os.path.join(os.getcwd(), "nltk_data")
+os.makedirs(nltk_data_path, exist_ok=True)
+nltk.data.path.append(nltk_data_path)
 
-# Download ONLY the required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt', download_dir=nltk_data_dir)
+# Download and verify ONLY the necessary NLTK data
+REQUIRED_NLTK_DATA = ['punkt', 'stopwords']
 
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords', download_dir=nltk_data_dir)
+for package in REQUIRED_NLTK_DATA:
+    try:
+        # Check if package is already available
+        nltk.data.find(f'tokenizers/{package}' if package == 'punkt' else f'corpora/{package}')
+    except LookupError:
+        # If not found, download it
+        nltk.download(package, download_dir=nltk_data_path)
+        # Verify download was successful
+        try:
+            nltk.data.find(f'tokenizers/{package}' if package == 'punkt' else f'corpora/{package}')
+        except LookupError:
+            st.error(f"Failed to download NLTK {package} data")
+            st.stop()
 
-# ===== MAIN APP CODE =====
+# ===== 2. TEXT PROCESSING =====
 from nltk.corpus import stopwords
-from nltk.stem.porter import PorterStemmer
+from nltk.stem import PorterStemmer
 
+# Preload resources for better performance
 ps = PorterStemmer()
-STOPWORDS = set(stopwords.words('english'))  # Convert to set for faster lookups
+STOPWORDS = set(stopwords.words('english'))
+PUNCTUATIONS = set(string.punctuation)
 
 def txt_trans(text):
-    # Lowercase
-    text = text.lower()
-    # Tokenize (uses punkt internally)
-    tokens = nltk.word_tokenize(text)
-    
-    # Remove non-alphanumeric
-    tokens = [token for token in tokens if token.isalnum()]
-    
-    # Remove stopwords and punctuation
-    tokens = [token for token in tokens 
-              if token not in STOPWORDS 
-              and token not in string.punctuation]
-    
-    # Stemming
-    tokens = [ps.stem(token) for token in tokens]
-    
-    return ' '.join(tokens)
+    try:
+        # Lowercase
+        text = text.lower()
+        # Tokenize (uses punkt internally)
+        tokens = nltk.word_tokenize(text)
+        # Remove non-alphanumeric
+        tokens = [token for token in tokens if token.isalnum()]
+        # Remove stopwords and punctuation
+        tokens = [token for token in tokens 
+                 if token not in STOPWORDS 
+                 and token not in PUNCTUATIONS]
+        # Stemming
+        tokens = [ps.stem(token) for token in tokens]
+        return ' '.join(tokens)
+    except Exception as e:
+        st.error(f"Text processing error: {str(e)}")
+        return ""
 
-# Load models with error handling
-try:
-    tfidf = pickle.load(open('vectorizer.pkl', 'rb'))
-    model = pickle.load(open('model.pkl', 'rb'))
-except Exception as e:
-    st.error(f"Failed to load models: {str(e)}")
-    st.stop()
+# ===== 3. MODEL LOADING =====
+@st.cache_resource
+def load_models():
+    try:
+        tfidf = pickle.load(open('vectorizer.pkl', 'rb'))
+        model = pickle.load(open('model.pkl', 'rb'))
+        return tfidf, model
+    except Exception as e:
+        st.error(f"Model loading failed: {str(e)}")
+        return None, None
 
-# Streamlit UI
+tfidf, model = load_models()
+
+# ===== 4. STREAMLIT UI =====
 st.title("Email/SMS Spam Classifier")
 
 input_sms = st.text_input("Enter the message")
 if st.button('Predict'):
     if not input_sms.strip():
         st.warning("Please enter a message!")
+    elif model is None:
+        st.error("Model not loaded - check server logs")
     else:
-        try:
-            transformed_sms = txt_trans(input_sms)
-            vector_input = tfidf.transform([transformed_sms])
-            result = model.predict(vector_input)[0]
+        transformed = txt_trans(input_sms)
+        if transformed:  # Only proceed if preprocessing succeeded
+            vector = tfidf.transform([transformed])
+            result = model.predict(vector)[0]
             st.header("SPAM 🚨" if result == 1 else "NOT SPAM ✅")
-        except Exception as e:
-            st.error(f"Prediction failed: {str(e)}")
