@@ -2,25 +2,24 @@ import streamlit as st
 import nltk
 import pickle
 import string
+from nltk.tokenize import TreebankWordTokenizer
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
 
-# Ensure NLTK resources are downloaded before use
+# Download only what's needed (safe)
 @st.cache_resource
 def setup_nltk():
-    nltk.download('punkt')
     nltk.download('stopwords')
     return True
 
 setup_nltk()
 
+tokenizer = TreebankWordTokenizer()
 ps = PorterStemmer()
 
 def txt_trans(text):
-    # Lowercase
     text = text.lower()
-    # Tokenize
-    text = nltk.word_tokenize(text)
+    text = tokenizer.tokenize(text)
 
     y = []
     for i in text:
@@ -53,19 +52,13 @@ input_sms = st.text_input("Enter the message")
 
 if st.button('Predict'):
     try:
-        # Preprocess
         transformed_sms = txt_trans(input_sms)
-
-        # Vectorize
         vector_input = tfidf.transform([transformed_sms])
-
-        # Predict
         result = model.predict(vector_input)[0]
 
-        # Display
         if result == 1:
             st.header("SPAM")
         else:
             st.header("NOT SPAM")
     except Exception as e:
-        st.error(f"An error occurred during prediction: {e}")
+        st.error(f"An error occurred during prediction:\n\n{e}")
